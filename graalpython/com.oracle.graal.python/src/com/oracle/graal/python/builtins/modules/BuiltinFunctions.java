@@ -27,40 +27,7 @@ package com.oracle.graal.python.builtins.modules;
 
 import static com.oracle.graal.python.builtins.objects.PNone.NO_VALUE;
 import static com.oracle.graal.python.builtins.objects.PNotImplemented.NOT_IMPLEMENTED;
-import static com.oracle.graal.python.nodes.BuiltinNames.ABS;
-import static com.oracle.graal.python.nodes.BuiltinNames.BIN;
-import static com.oracle.graal.python.nodes.BuiltinNames.BREAKPOINT;
-import static com.oracle.graal.python.nodes.BuiltinNames.BREAKPOINTHOOK;
-import static com.oracle.graal.python.nodes.BuiltinNames.CALLABLE;
-import static com.oracle.graal.python.nodes.BuiltinNames.CHR;
-import static com.oracle.graal.python.nodes.BuiltinNames.COMPILE;
-import static com.oracle.graal.python.nodes.BuiltinNames.DELATTR;
-import static com.oracle.graal.python.nodes.BuiltinNames.DIR;
-import static com.oracle.graal.python.nodes.BuiltinNames.DIVMOD;
-import static com.oracle.graal.python.nodes.BuiltinNames.EVAL;
-import static com.oracle.graal.python.nodes.BuiltinNames.EXEC;
-import static com.oracle.graal.python.nodes.BuiltinNames.GETATTR;
-import static com.oracle.graal.python.nodes.BuiltinNames.HASH;
-import static com.oracle.graal.python.nodes.BuiltinNames.HEX;
-import static com.oracle.graal.python.nodes.BuiltinNames.ID;
-import static com.oracle.graal.python.nodes.BuiltinNames.ISINSTANCE;
-import static com.oracle.graal.python.nodes.BuiltinNames.ISSUBCLASS;
-import static com.oracle.graal.python.nodes.BuiltinNames.ITER;
-import static com.oracle.graal.python.nodes.BuiltinNames.LEN;
-import static com.oracle.graal.python.nodes.BuiltinNames.MAX;
-import static com.oracle.graal.python.nodes.BuiltinNames.MIN;
-import static com.oracle.graal.python.nodes.BuiltinNames.NEXT;
-import static com.oracle.graal.python.nodes.BuiltinNames.OCT;
-import static com.oracle.graal.python.nodes.BuiltinNames.ORD;
-import static com.oracle.graal.python.nodes.BuiltinNames.POW;
-import static com.oracle.graal.python.nodes.BuiltinNames.PRINT;
-import static com.oracle.graal.python.nodes.BuiltinNames.REPR;
-import static com.oracle.graal.python.nodes.BuiltinNames.ROUND;
-import static com.oracle.graal.python.nodes.BuiltinNames.SETATTR;
-import static com.oracle.graal.python.nodes.BuiltinNames.SUM;
-import static com.oracle.graal.python.nodes.BuiltinNames.__BUILTIN__;
-import static com.oracle.graal.python.nodes.BuiltinNames.__DEBUG__;
-import static com.oracle.graal.python.nodes.BuiltinNames.__DUMP_TRUFFLE_AST__;
+import static com.oracle.graal.python.nodes.BuiltinNames.*;
 import static com.oracle.graal.python.nodes.HiddenAttributes.ID_KEY;
 import static com.oracle.graal.python.nodes.SpecialAttributeNames.__NAME__;
 import static com.oracle.graal.python.nodes.SpecialMethodNames.__INSTANCECHECK__;
@@ -170,6 +137,7 @@ import com.oracle.graal.python.runtime.PythonParser.ParserMode;
 import com.oracle.graal.python.runtime.exception.PException;
 import com.oracle.graal.python.runtime.exception.PythonErrorType;
 import com.oracle.graal.python.runtime.sequence.PSequence;
+import com.oracle.graal.python.thanos.TensorAdapter;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -197,6 +165,7 @@ import com.oracle.truffle.api.nodes.UnexpectedResultException;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 import com.oracle.truffle.api.source.Source;
+import org.graalvm.polyglot.Value;
 
 @CoreFunctions(defineModule = "builtins")
 public final class BuiltinFunctions extends PythonBuiltins {
@@ -1960,6 +1929,26 @@ public final class BuiltinFunctions extends PythonBuiltins {
             } else {
                 return readLocalsNode.execute(frame, materializeNode.execute(frame, this, false, false, generatorFrame));
             }
+        }
+    }
+
+    // Thanos Adapter
+    //TODO: the PythonUnaryBuiltinNode does not seem to support Object return types?
+    //TODO: minNumOfPositionalArgs does not seem like what I want. I want an exact num of positional args.
+    @Builtin(name =__THANOS_TENSOR_CAST__, minNumOfPositionalArgs = 1)
+    @GenerateNodeFactory
+    public abstract static class ToTensorNode extends PythonUnaryBuiltinNode {
+
+        @Specialization
+        Object doDefault(Object obj){
+            Value val = (Value) obj; // TODO: what's the right way of doing this?
+            String className = val.getMetaObject().toString();
+            if(className != "numpy"){
+                //TODO: throw some exception
+                return null;
+            }
+            Object tensor = new TensorAdapter(); //TODO: pass in obj
+            return tensor;
         }
     }
 }
