@@ -40,12 +40,10 @@
  */
 package com.oracle.graal.python.builtins.objects.cext;
 
-import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_GET_OB_TYPE;
 import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_NATIVE_LONG_TO_JAVA;
 import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_NATIVE_TO_JAVA;
 import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_PTR_COMPARE;
 import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_PY_FLOAT_AS_DOUBLE;
-import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_PY_OBJECT_GENERIC_GET_DICT;
 import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_PY_TRUFFLE_BYTE_ARRAY_TO_NATIVE;
 import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_PY_TRUFFLE_CSTR_TO_STRING;
 import static com.oracle.graal.python.builtins.objects.cext.NativeCAPISymbols.FUN_PY_TRUFFLE_STRING_TO_CSTR;
@@ -66,7 +64,6 @@ import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.AllToSulon
 import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.AsLongNodeGen;
 import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.CextUpcallNodeGen;
 import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.DirectUpcallNodeGen;
-import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.GetNativeClassNodeFactory.GetNativeClassCachedNodeGen;
 import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.GetTypeMemberNodeGen;
 import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.IsPointerNodeGen;
 import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.ObjectUpcallNodeGen;
@@ -74,6 +71,7 @@ import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.PointerCom
 import com.oracle.graal.python.builtins.objects.cext.CExtNodesFactory.ToJavaNodeFactory.ToJavaCachedNodeGen;
 import com.oracle.graal.python.builtins.objects.cext.DynamicObjectNativeWrapper.PrimitiveNativeWrapper;
 import com.oracle.graal.python.builtins.objects.cext.DynamicObjectNativeWrapper.PythonObjectNativeWrapper;
+import com.oracle.graal.python.builtins.objects.common.SequenceStorageNodes;
 import com.oracle.graal.python.builtins.objects.floats.PFloat;
 import com.oracle.graal.python.builtins.objects.function.PFunction;
 import com.oracle.graal.python.builtins.objects.function.PKeyword;
@@ -83,6 +81,7 @@ import com.oracle.graal.python.builtins.objects.str.PString;
 import com.oracle.graal.python.builtins.objects.type.PythonAbstractClass;
 import com.oracle.graal.python.builtins.objects.type.PythonManagedClass;
 import com.oracle.graal.python.builtins.objects.type.TypeNodes;
+import com.oracle.graal.python.builtins.objects.type.TypeNodes.GetMroStorageNode;
 import com.oracle.graal.python.builtins.objects.type.TypeNodes.GetNameNode;
 import com.oracle.graal.python.nodes.PGuards;
 import com.oracle.graal.python.nodes.PNodeWithContext;
@@ -117,6 +116,7 @@ import com.oracle.graal.python.runtime.PythonCore;
 import com.oracle.graal.python.runtime.exception.PException;
 import com.oracle.graal.python.runtime.exception.PythonErrorType;
 import com.oracle.graal.python.runtime.object.PythonObjectFactory;
+import com.oracle.graal.python.runtime.sequence.storage.MroSequenceStorage;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -256,6 +256,17 @@ public abstract class CExtNodes {
 
         public static FloatSubtypeNew create() {
             return CExtNodesFactory.FloatSubtypeNewNodeGen.create();
+        }
+    }
+
+    public abstract static class TupleSubtypeNew extends SubtypeNew {
+        @Override
+        protected final String getTypenamePrefix() {
+            return "tuple";
+        }
+
+        public static TupleSubtypeNew create() {
+            return CExtNodesFactory.TupleSubtypeNewNodeGen.create();
         }
     }
 
@@ -856,76 +867,6 @@ public abstract class CExtNodes {
                         @Cached PCallCapiFunction callCstrToStringNode) {
 
             return (String) callCstrToStringNode.call(FUN_PY_TRUFFLE_CSTR_TO_STRING, charPtr);
-        }
-    }
-
-    // -----------------------------------------------------------------------------------------------------------------
-    public abstract static class GetNativeClassNode extends CExtBaseNode {
-        public abstract PythonAbstractClass execute(PythonNativeObject object);
-
-        abstract static class GetNativeClassCachedNode extends GetNativeClassNode {
-            @Specialization(guards = "object == cachedObject", limit = "1")
-            static PythonAbstractClass getNativeClassCachedIdentity(@SuppressWarnings("unused") PythonNativeObject object,
-                            @Exclusive @Cached("object") @SuppressWarnings("unused") PythonNativeObject cachedObject,
-                            @Exclusive @Cached(value = "getNativeClassUncached(cachedObject)", allowUncached = true) PythonAbstractClass cachedClass) {
-                // TODO: (tfel) is this really something we can do? It's so rare for this class to
-                // change that it shouldn't be worth the effort, but in native code, anything can
-                // happen. OTOH, CPython also has caches that can become invalid when someone just
-                // goes and changes the ob_type of an object.
-                return cachedClass;
-            }
-
-            @Specialization(guards = "cachedObject.equals(object)", limit = "1", assumptions = "singleContextAssumption()")
-            static PythonAbstractClass getNativeClassCached(@SuppressWarnings("unused") PythonNativeObject object,
-                            @Exclusive @Cached("object") @SuppressWarnings("unused") PythonNativeObject cachedObject,
-                            @Exclusive @Cached(value = "getNativeClassUncached(cachedObject)", allowUncached = true) PythonAbstractClass cachedClass) {
-                // TODO same as for 'getNativeClassCachedIdentity'
-                return cachedClass;
-            }
-
-            @Specialization(replaces = "getNativeClassCached")
-            static PythonAbstractClass getNativeClass(PythonNativeObject object,
-                            @Exclusive @Cached PCallCapiFunction callGetObTypeNode,
-                            @Exclusive @Cached ToJavaNode toJavaNode) {
-                // do not convert wrap 'object.object' since that is really the native pointer
-                // object
-                return (PythonAbstractClass) toJavaNode.execute(callGetObTypeNode.call(FUN_GET_OB_TYPE, object.getPtr()));
-            }
-
-            protected static PythonAbstractClass getNativeClassUncached(PythonNativeObject object) {
-                // do not convert wrap 'object.object' since that is really the native pointer
-                // object
-                return getNativeClass(object, PCallCapiFunction.getUncached(), ToJavaNode.getUncached());
-            }
-        }
-
-        private static final class Uncached extends GetNativeClassNode {
-            private static final Uncached INSTANCE = new Uncached();
-
-            @TruffleBoundary
-            @Override
-            public PythonAbstractClass execute(PythonNativeObject object) {
-                return GetNativeClassCachedNode.getNativeClassUncached(object);
-            }
-
-            @Override
-            public NodeCost getCost() {
-                return NodeCost.MEGAMORPHIC;
-            }
-
-            @Override
-            public boolean isAdoptable() {
-                return false;
-            }
-
-        }
-
-        public static GetNativeClassNode create() {
-            return GetNativeClassCachedNodeGen.create();
-        }
-
-        public static GetNativeClassNode getUncached() {
-            return Uncached.INSTANCE;
         }
     }
 
@@ -1718,35 +1659,6 @@ public abstract class CExtNodes {
         }
     }
 
-    // -----------------------------------------------------------------------------------------------------------------
-    @GenerateUncached
-    public abstract static class GetObjectDictNode extends CExtBaseNode {
-        public abstract Object execute(Object self);
-
-        @Specialization
-        public Object execute(Object self,
-                        @Exclusive @Cached ToSulongNode toSulong,
-                        @Exclusive @Cached ToJavaNode toJava,
-                        @CachedLibrary(limit = "1") InteropLibrary interopLibrary,
-                        @Exclusive @Cached ImportCAPISymbolNode importCAPISymbolNode) {
-            try {
-                Object func = importCAPISymbolNode.execute(FUN_PY_OBJECT_GENERIC_GET_DICT);
-                return toJava.execute(interopLibrary.execute(func, toSulong.execute(self)));
-            } catch (UnsupportedTypeException | ArityException | UnsupportedMessageException e) {
-                CompilerDirectives.transferToInterpreter();
-                throw new IllegalStateException("could not run our core function to get the dict of a native object", e);
-            }
-        }
-
-        public static GetObjectDictNode create() {
-            return CExtNodesFactory.GetObjectDictNodeGen.create();
-        }
-
-        public static GetObjectDictNode getUncached() {
-            return CExtNodesFactory.GetObjectDictNodeGen.getUncached();
-        }
-    }
-
     @GenerateUncached
     @TypeSystemReference(PythonTypes.class)
     public abstract static class GetTypeMemberNode extends CExtBaseNode {
@@ -1880,6 +1792,53 @@ public abstract class CExtNodes {
                 return true;
             }
             return pointerCompareNode.execute(SpecialMethodNames.__EQ__, left, right);
+        }
+    }
+
+    /**
+     * Use this node to lookup a native type member like {@code tp_alloc}.<br>
+     * <p>
+     * This node basically implements the native member inheritance that is done by
+     * {@code inherit_special} or other code in {@code PyType_Ready}.
+     * </p>
+     * <p>
+     * Since it may be that a managed types needs to emulate such members but there is no
+     * corresponding Python attribute (e.g. {@code tp_alloc}), such members are stored as hidden
+     * keys on the managed type. However, the MRO may contain native types and in this case, we need
+     * to access the native member.
+     * </p>
+     */
+    @GenerateUncached
+    public abstract static class LookupNativeMemberInMRONode extends Node {
+
+        public abstract Object execute(PythonAbstractClass cls, String nativeMemberName, Object managedMemberName);
+
+        @Specialization
+        Object doSingleContext(PythonAbstractClass cls, String nativeMemberName, Object managedMemberName,
+                        @Cached GetMroStorageNode getMroNode,
+                        @Cached SequenceStorageNodes.LenNode lenNode,
+                        @Cached SequenceStorageNodes.GetItemDynamicNode getItemNode,
+                        @Cached("createForceType()") ReadAttributeFromObjectNode readAttrNode,
+                        @Cached GetTypeMemberNode getTypeMemberNode) {
+
+            MroSequenceStorage mroStorage = getMroNode.execute(cls);
+            int n = lenNode.execute(mroStorage);
+
+            for (int i = 0; i < n; i++) {
+                PythonAbstractClass mroCls = (PythonAbstractClass) getItemNode.execute(mroStorage, i);
+                Object result = PNone.NO_VALUE;
+                if (PGuards.isManagedClass(mroCls)) {
+                    result = readAttrNode.execute(mroCls, managedMemberName);
+                } else {
+                    assert PGuards.isNativeClass(mroCls) : "invalid class inheritance structure; expected native class";
+                    result = getTypeMemberNode.execute(mroCls, nativeMemberName);
+                }
+                if (result != PNone.NO_VALUE) {
+                    return result;
+                }
+            }
+
+            return PNone.NO_VALUE;
         }
     }
 }
