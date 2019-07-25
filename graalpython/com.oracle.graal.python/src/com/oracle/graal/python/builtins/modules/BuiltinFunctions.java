@@ -138,7 +138,6 @@ import com.oracle.graal.python.runtime.PythonParser.ParserMode;
 import com.oracle.graal.python.runtime.exception.PException;
 import com.oracle.graal.python.runtime.exception.PythonErrorType;
 import com.oracle.graal.python.runtime.sequence.PSequence;
-import com.oracle.graal.python.thanos.TensorAdapter;
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.CompilerDirectives;
@@ -1955,7 +1954,7 @@ public final class BuiltinFunctions extends PythonBuiltins {
     // Thanos Adapter
     //TODO: the PythonUnaryBuiltinNode does not seem to support Object return types?
     //TODO: minNumOfPositionalArgs does not seem like what I want. I want an exact num of positional args.
-    @Builtin(name =__THANOS_TENSOR_CAST__, minNumOfPositionalArgs = 1)
+    /*@Builtin(name =__THANOS_TENSOR_CAST__, minNumOfPositionalArgs = 1)
     @GenerateNodeFactory
     public abstract static class ToTensorNode extends PythonUnaryBuiltinNode {
 
@@ -1970,5 +1969,5 @@ public final class BuiltinFunctions extends PythonBuiltins {
             Object tensor = new TensorAdapter(); //TODO: pass in obj
             return tensor;
         }
-    }
+    }*/
 }
